@@ -60,11 +60,10 @@ export default function App() {
 
   // === Inicializa PeerJS com servidor público ===
   useEffect(() => {
-    const p = new Peer({
-      host: "peerjs.com",
+    const p = new Peer(undefined, {
+      host: 'peerjs-server.herokuapp.com', // servidor público
       port: 443,
-      secure: true,
-      debug: 2,
+      secure: true
     });
 
     setPeer(p);
