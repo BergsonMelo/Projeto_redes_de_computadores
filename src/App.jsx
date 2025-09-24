@@ -1,218 +1,76 @@
-import React, { useState, useEffect, useRef } from "react";
-import Peer from "peerjs";
-
-// === Função para gerar labirinto ===
-function generateMaze(width, height) {
-  const maze = Array.from({ length: height }, () =>
-    Array.from({ length: width }, () => ({
-      top: true,
-      right: true,
-      bottom: true,
-      left: true,
-    }))
-  );
-
-  const visited = Array.from({ length: height }, () => Array(width).fill(false));
-
-  const dirs = [
-    { dx: 0, dy: -1, wall: "top", opp: "bottom" },
-    { dx: 1, dy: 0, wall: "right", opp: "left" },
-    { dx: 0, dy: 1, wall: "bottom", opp: "top" },
-    { dx: -1, dy: 0, wall: "left", opp: "right" },
-  ];
-
-  function shuffle(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
-  }
-
-  function dfs(x, y) {
-    visited[y][x] = true;
-    const neighbors = shuffle(dirs.slice());
-    for (const { dx, dy, wall, opp } of neighbors) {
-      const nx = x + dx;
-      const ny = y + dy;
-      if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny][nx]) {
-        maze[y][x][wall] = false;
-        maze[ny][nx][opp] = false;
-        dfs(nx, ny);
-      }
-    }
-  }
-
-  dfs(0, 0);
-  return maze;
-}
+import React, { useEffect, useRef, useState } from 'react';
+import { io } from 'socket.io-client';
 
 export default function App() {
   const canvasRef = useRef(null);
-  const [peer, setPeer] = useState(null);
-  const [conn, setConn] = useState(null);
-  const [peerId, setPeerId] = useState("");
-  const [myId, setMyId] = useState("");
   const [players, setPlayers] = useState({});
-  const maze = useRef(null);
-  const [mazeVersion, setMazeVersion] = useState(0);
-  const [isHost, setIsHost] = useState(false);
+  const [myId, setMyId] = useState('');
+  const socketRef = useRef(null);
 
-  // === Inicializa PeerJS com servidor público ===
+  // Conecta no servidor
   useEffect(() => {
-    const p = new Peer(undefined, {
-      host: 'peerjs-server.herokuapp.com', // servidor público
-      port: 443,
-      secure: true
+    socketRef.current = io('https://SEU_SERVIDOR_AQUI'); // substitua pelo backend
+    const socket = socketRef.current;
+
+    socket.on('connect', () => setMyId(socket.id));
+
+    socket.on('init', (initialPlayers) => setPlayers(initialPlayers));
+
+    socket.on('update', ({ id, pos }) => {
+      setPlayers(prev => ({ ...prev, [id]: pos }));
     });
 
-    setPeer(p);
-
-    p.on("open", (id) => {
-      setMyId(id);
-      setPlayers({ [id]: { x: 0, y: 0, id } });
-
-      // Host inicializa labirinto
-      if (!peerId) {
-        maze.current = generateMaze(15, 10);
-        setIsHost(true);
-      }
+    socket.on('remove', (id) => {
+      setPlayers(prev => {
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
     });
 
-    p.on("connection", (c) => {
-      setupConnection(c);
-    });
+    return () => socket.disconnect();
   }, []);
 
-  function setupConnection(c) {
-    c.on("data", (msg) => {
-      switch (msg.type) {
-        case "maze":
-          if (!isHost) {
-            maze.current = msg.maze;
-            setMazeVersion((v) => v + 1);
-          }
-          break;
-        case "move":
-          setPlayers((prev) => ({ ...prev, [msg.player.id]: msg.player }));
-          break;
-        case "state":
-          setPlayers((prev) => {
-            const merged = { ...prev };
-            for (const id in msg.players) if (id !== myId) merged[id] = msg.players[id];
-            return merged;
-          });
-          break;
-        case "request-maze":
-          if (isHost) {
-            c.send({ type: "maze", maze: maze.current });
-            c.send({ type: "state", players });
-          }
-          break;
-      }
-    });
-
-    c.on("open", () => {
-      setConn(c);
-      if (!isHost) {
-        c.send({ type: "request-maze" });
-      } else {
-        c.send({ type: "maze", maze: maze.current });
-        c.send({ type: "state", players });
-      }
-    });
-  }
-
-  function connectToPeer() {
-    if (!peer || !peerId) return;
-    const c = peer.connect(peerId);
-    setupConnection(c);
-  }
-
-  function move(dir) {
-    setPlayers((prev) => {
-      const me = { ...prev[myId] };
-      const cell = maze.current[me.y][me.x];
-      let nx = me.x;
-      let ny = me.y;
-
-      if ((dir === "up" || dir === "w") && !cell.top) ny--;
-      if ((dir === "down" || dir === "s") && !cell.bottom) ny++;
-      if ((dir === "left" || dir === "a") && !cell.left) nx--;
-      if ((dir === "right" || dir === "d") && !cell.right) nx++;
-
-      if (nx >= 0 && nx < 15 && ny >= 0 && ny < 10) {
-        me.x = nx;
-        me.y = ny;
-      }
-
-      const updated = { ...prev, [myId]: me };
-      if (conn?.open) conn.send({ type: "move", player: me });
-      return updated;
-    });
-  }
-
-  // Renderiza labirinto
-  useEffect(() => {
-    if (!maze.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const cellSize = 40;
-
-    function draw() {
-      ctx.fillStyle = "#111";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.strokeStyle = "#fff";
-      maze.current.forEach((row, y) => {
-        row.forEach((cell, x) => {
-          const x0 = x * cellSize;
-          const y0 = y * cellSize;
-          if (cell.top) ctx.strokeRect(x0, y0, cellSize, 1);
-          if (cell.right) ctx.strokeRect(x0 + cellSize - 1, y0, 1, cellSize);
-          if (cell.bottom) ctx.strokeRect(x0, y0 + cellSize - 1, cellSize, 1);
-          if (cell.left) ctx.strokeRect(x0, y0, 1, cellSize);
-        });
-      });
-
-      Object.entries(players).forEach(([id, p]) => {
-        ctx.fillStyle = id === myId ? "green" : "red";
-        ctx.beginPath();
-        ctx.arc(p.x * cellSize + cellSize / 2, p.y * cellSize + cellSize / 2, 10, 0, 2 * Math.PI);
-        ctx.fill();
-      });
-    }
-
-    draw();
-  }, [players, mazeVersion]);
-
-  // Controles de teclado
+  // Teclado para movimentar
   useEffect(() => {
     function handleKey(e) {
-      if (["ArrowUp", "w"].includes(e.key)) move("up");
-      if (["ArrowDown", "s"].includes(e.key)) move("down");
-      if (["ArrowLeft", "a"].includes(e.key)) move("left");
-      if (["ArrowRight", "d"].includes(e.key)) move("right");
+      const me = players[myId];
+      if (!me) return;
+      let { x, y } = me;
+
+      if (e.key === 'ArrowUp') y--;
+      if (e.key === 'ArrowDown') y++;
+      if (e.key === 'ArrowLeft') x--;
+      if (e.key === 'ArrowRight') x++;
+
+      const newPos = { x, y };
+      setPlayers(prev => ({ ...prev, [myId]: newPos }));
+      socketRef.current.emit('move', newPos);
     }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [players, conn]);
+
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [players, myId]);
+
+  // Renderiza jogadores
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const cellSize = 40;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    Object.entries(players).forEach(([id, p]) => {
+      ctx.fillStyle = id === myId ? 'green' : 'red';
+      ctx.fillRect(p.x * cellSize, p.y * cellSize, cellSize, cellSize);
+    });
+  }, [players]);
 
   return (
-    <div style={{ textAlign: "center", padding: "1rem" }}>
-      <h1>Maze P2P</h1>
-      <p>Meu Peer ID: {myId}</p>
-      <input
-        value={peerId}
-        onChange={(e) => setPeerId(e.target.value)}
-        placeholder="Peer ID para conectar"
-      />
-      <button onClick={connectToPeer}>Conectar</button>
-
-      <div style={{ marginTop: "1rem" }}>
-        <canvas ref={canvasRef} width={15 * 40} height={10 * 40} />
-      </div>
-      <p>Use setas ou W A S D para se mover. Verde é você!</p>
+    <div style={{ textAlign: 'center' }}>
+      <h1>Maze P2P via Socket.IO</h1>
+      <canvas ref={canvasRef} width={15*40} height={10*40} style={{ border: '1px solid #000' }} />
+      <p>ID: {myId}</p>
     </div>
   );
 }
