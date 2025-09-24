@@ -7,9 +7,10 @@ export default function App() {
   const [myId, setMyId] = useState('');
   const socketRef = useRef(null);
 
-  // Conecta no servidor
+  // Conecta no backend Socket.IO
   useEffect(() => {
-    socketRef.current = io('https://SEU_SERVIDOR_AQUI'); // substitua pelo backend
+    // Use o URL HTTPS do Render (porta 443 é padrão)
+    socketRef.current = io('https://projeto-redes-de-computadores.onrender.com'); 
     const socket = socketRef.current;
 
     socket.on('connect', () => setMyId(socket.id));
@@ -31,11 +32,12 @@ export default function App() {
     return () => socket.disconnect();
   }, []);
 
-  // Teclado para movimentar
+  // Movimentação do jogador via teclado
   useEffect(() => {
     function handleKey(e) {
       const me = players[myId];
       if (!me) return;
+
       let { x, y } = me;
 
       if (e.key === 'ArrowUp') y--;
@@ -52,9 +54,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [players, myId]);
 
-  // Renderiza jogadores
+  // Renderiza os jogadores no canvas
   useEffect(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const cellSize = 40;
 
@@ -67,10 +70,16 @@ export default function App() {
   }, [players]);
 
   return (
-    <div style={{ textAlign: 'center' }}>
+    <div style={{ textAlign: 'center', padding: '1rem' }}>
       <h1>Maze P2P via Socket.IO</h1>
-      <canvas ref={canvasRef} width={15*40} height={10*40} style={{ border: '1px solid #000' }} />
-      <p>ID: {myId}</p>
+      <canvas 
+        ref={canvasRef} 
+        width={15*40} 
+        height={10*40} 
+        style={{ border: '1px solid #000' }} 
+      />
+      <p>Seu ID: {myId}</p>
+      <p>Use as setas do teclado para se mover. Verde é você!</p>
     </div>
   );
 }
