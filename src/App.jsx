@@ -136,13 +136,17 @@ export default function App() {
       });
     });
 
+    // garante que meu jogador existe
+    if (!players[myId]) setPlayers(prev => ({ ...prev, [myId]: { x: 0, y: 0 } }));
+
     Object.entries(players).forEach(([id, p]) => {
       ctx.fillStyle = id === myId ? 'green' : 'red';
       ctx.beginPath();
       ctx.arc(p.x * cellSize + cellSize / 2, p.y * cellSize + cellSize / 2, 10, 0, 2 * Math.PI);
       ctx.fill();
     });
-  }, [players]);
+  }, [players, myId]);
+
 
   return (
     <div style={{ textAlign: 'center' }}>
